@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- QR Code Scan & Ballot Urn Icon (safe zone ~66dp inside 108dp) -->
+    <!-- Corner brackets of QR scan frame -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFC837"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 32,40 L 32,32 L 40,32" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFC837"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 68,32 L 76,32 L 76,40" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFC837"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 32,68 L 32,76 L 40,76" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFC837"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 68,76 L 76,76 L 76,68" />
+
+    <!-- Ballot Urn Body -->
+    <path
+        android:fillColor="#E2EDF9"
+        android:pathData="M 38,44 L 70,44 C 71.5,44 72.5,45.2 72.5,46.8 L 70.5,67 C 70.3,68.2 69.2,69 68,69 L 40,69 C 38.8,69 37.7,68.2 37.5,67 L 35.5,46.8 C 35.5,45.2 36.5,44 38,44 Z" />
+
+    <!-- Slot on Top of Urn -->
+    <path
+        android:fillColor="#15365C"
+        android:pathData="M 46,47 L 62,47 C 62.5,47 63,47.5 63,48 C 63,48.5 62.5,49 62,49 L 46,49 C 45.5,49 45,48.5 45,48 C 45,47.5 45.5,47 46,47 Z" />
+
+    <!-- Glowing Checkmark / Vote on Urn -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#0E9F6E"
+        android:strokeWidth="3.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 47,58 L 52.5,63.5 L 63,53" />
+
+    <!-- Laser scan line across QR -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#4E9FFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M 34,54 L 74,54" />
+</vector>
