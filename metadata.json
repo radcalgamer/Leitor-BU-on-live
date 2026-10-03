@@ -1,0 +1,6 @@
+{
+  "name": "Leitor de BU",
+  "description": "Leitor de Boletins de Urna com validação de QR Code, gráficos e indicadores de votação e importador de candidatos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
