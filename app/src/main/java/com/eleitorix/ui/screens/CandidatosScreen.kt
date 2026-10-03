@@ -1,9 +1,11 @@
 package com.eleitorix.ui.screens
 
+import android.content.Context
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,7 +25,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.HowToVote
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -115,7 +122,16 @@ fun CandidatosScreen(
                             val nomeCharset = if (charsetUsado == Charsets.UTF_8) "UTF-8" else "ISO-8859-1"
                             Toast.makeText(context, "$count candidatos importados com sucesso ($nomeCharset)!", Toast.LENGTH_LONG).show()
                         } else {
-                            Toast.makeText(context, "Erro ao importar: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                            // Tenta com Latin-1 caso seja exportação clássica TSE
+                            context.contentResolver.openInputStream(uri)?.use { streamLatin1 ->
+                                val resLatin1 = repository.importarCsv(streamLatin1, Charsets.ISO_8859_1)
+                                if (resLatin1.isSuccess) {
+                                    val count = resLatin1.getOrNull() ?: 0
+                                    Toast.makeText(context, "$count candidatos importados (ISO-8859-1)!", Toast.LENGTH_LONG).show()
+                                } else {
+                                    Toast.makeText(context, "Erro ao importar: ${resLatin1.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                                }
+                            }
                         }
                     }
                 } catch (e: Exception) {

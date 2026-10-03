@@ -1,5 +1,8 @@
 package com.eleitorix.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,11 +21,14 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.HowToVote
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -49,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import com.eleitorix.data.repository.BuRepository
 import com.eleitorix.data.repository.CargoAgregado
 import com.eleitorix.data.repository.EleicaoAgregada
+import com.eleitorix.model.BoletimUrna
 import com.eleitorix.model.CargoNomes
 import com.eleitorix.parser.BuQrAssembler
 import com.eleitorix.ui.components.CandidateVoteBar
@@ -73,7 +80,6 @@ fun ResultadosScreen(
     var filtroCargoSelecionado by remember { mutableStateOf<Int?>(null) }
     var eleicaoAgregada by remember { mutableStateOf<EleicaoAgregada?>(null) }
 
-    // Atualiza agregação sempre que mudar boletins ou filtros
     LaunchedEffect(boletins, filtroUf, filtroCargoSelecionado) {
         if (boletins.isNotEmpty()) {
             eleicaoAgregada = repository.agregarResultados(
@@ -122,7 +128,6 @@ fun ResultadosScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Barra de Status com Contagem Pluralizada Correta: "1 seção" vs "X seções"
                 item {
                     val secoesTexto = repository.formatarTotalSecoes(eleicaoAgregada?.totalSecoes ?: 0)
                     Card(
@@ -155,7 +160,6 @@ fun ResultadosScreen(
                                 )
                             }
 
-                            // Botão para navegar até o scanner e ler mais seções reais
                             Button(
                                 onClick = onNavigateToScanner,
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
@@ -179,7 +183,6 @@ fun ResultadosScreen(
                     }
                 }
 
-                // Filtro por UF
                 if (ufsDisponiveis.size > 2) {
                     item {
                         Column {
@@ -212,7 +215,6 @@ fun ResultadosScreen(
                     }
                 }
 
-                // Filtro por Cargo
                 if (cargosDisponiveis.isNotEmpty()) {
                     item {
                         Column {
@@ -257,7 +259,6 @@ fun ResultadosScreen(
                     }
                 }
 
-                // Card de Comparecimento Geral
                 eleicaoAgregada?.let { agregada ->
                     item {
                         TurnoutDonutChart(
@@ -267,7 +268,6 @@ fun ResultadosScreen(
                         )
                     }
 
-                    // Seções dos Cargos Apurados
                     itemsIndexed(agregada.cargos) { _, cargo ->
                         CargoResultadosCard(cargo = cargo)
                     }
@@ -291,7 +291,6 @@ private fun CargoResultadosCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Cabeçalho do Cargo
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -325,7 +324,6 @@ private fun CargoResultadosCard(
                 }
             }
 
-            // Projeção de 2º Turno (apresentado de forma elegante quando aplicável)
             cargo.projecaoSegundoTurno?.let { projecao ->
                 Spacer(modifier = Modifier.height(12.dp))
                 SegundoTurnoCard(projecao = projecao)
@@ -333,7 +331,6 @@ private fun CargoResultadosCard(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Ranking de Candidatos
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 cargo.votosCandidatos.forEachIndexed { index, candidato ->
                     CandidateVoteBar(
@@ -344,7 +341,6 @@ private fun CargoResultadosCard(
                 }
             }
 
-            // Estatísticas de Brancos e Nulos
             Spacer(modifier = Modifier.height(14.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -422,7 +418,6 @@ private fun CargoResultadosCard(
                 }
             }
 
-            // Gráfico de Distribuição por Partido
             val votosPartidos = remember(cargo) {
                 val map = mutableMapOf<String, Int>()
                 cargo.votosCandidatos.forEach { v ->

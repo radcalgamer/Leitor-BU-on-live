@@ -21,6 +21,7 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -41,9 +42,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
@@ -61,6 +64,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -78,6 +82,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -86,6 +91,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.eleitorix.data.preferences.AppPreferences
@@ -146,6 +152,7 @@ fun ScannerScreen(
     var showTextInputDialog by remember { mutableStateOf(false) }
     var isProcessingQr by remember { mutableStateOf(false) }
 
+    // Galeria picker
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -172,7 +179,7 @@ fun ScannerScreen(
                         )
                     } else {
                         statusMensagem = "Nenhum QR Code legível foi detectado na imagem."
-                        Toast.makeText(context, "QR Code não encontrado na foto", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "QR Code não encontrado na imagem", Toast.LENGTH_SHORT).show()
                         isProcessingQr = false
                     }
                 } else {
@@ -187,6 +194,7 @@ fun ScannerScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
+        // Câmera Preview ou Aviso de Permissão
         if (hasCameraPermission) {
             CameraPreviewView(
                 isScanningEnabled = !isProcessingQr && !showResultadoSheet,
@@ -217,6 +225,7 @@ fun ScannerScreen(
                 }
             )
 
+            // Moldura de Leitura Central com Laser Animado
             ScanOverlay(
                 statusText = statusMensagem,
                 quadrosLidos = assembler.getQuadrosRecebidosCount(),
@@ -257,6 +266,7 @@ fun ScannerScreen(
             }
         }
 
+        // Barra de Ações Superior (Flash, Digitar, Galeria)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -299,6 +309,7 @@ fun ScannerScreen(
                         )
                     }
                 }
+
                 Surface(
                     shape = CircleShape,
                     color = Color.Black.copy(alpha = 0.6f)
@@ -314,6 +325,7 @@ fun ScannerScreen(
             }
         }
 
+        // Botão Inferior Flutuante: "Carregar Eleição Geral Completa (Exemplo TSE)"
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -370,6 +382,7 @@ fun ScannerScreen(
         )
     }
 
+    // Dialog para colar ou digitar o código do BU
     if (showTextInputDialog) {
         var textoInput by remember { mutableStateOf("") }
         AlertDialog(
@@ -485,23 +498,26 @@ private fun ScanOverlay(
             modifier = Modifier.size(260.dp),
             contentAlignment = Alignment.Center
         ) {
+            // Moldura cantos
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val cornerLen = 32.dp.toPx()
                 val strokeW = 4.dp.toPx()
                 val cornerColor = Color(0xFFFFC837)
 
+                // Top-Left
                 drawLine(cornerColor, Offset(0f, 0f), Offset(cornerLen, 0f), strokeW, StrokeCap.Round)
                 drawLine(cornerColor, Offset(0f, 0f), Offset(0f, cornerLen), strokeW, StrokeCap.Round)
-
+                // Top-Right
                 drawLine(cornerColor, Offset(size.width, 0f), Offset(size.width - cornerLen, 0f), strokeW, StrokeCap.Round)
                 drawLine(cornerColor, Offset(size.width, 0f), Offset(size.width, cornerLen), strokeW, StrokeCap.Round)
-
+                // Bottom-Left
                 drawLine(cornerColor, Offset(0f, size.height), Offset(cornerLen, size.height), strokeW, StrokeCap.Round)
                 drawLine(cornerColor, Offset(0f, size.height), Offset(0f, size.height - cornerLen), strokeW, StrokeCap.Round)
-
+                // Bottom-Right
                 drawLine(cornerColor, Offset(size.width, size.height), Offset(size.width - cornerLen, size.height), strokeW, StrokeCap.Round)
                 drawLine(cornerColor, Offset(size.width, size.height), Offset(size.width, size.height - cornerLen), strokeW, StrokeCap.Round)
 
+                // Laser scan line
                 val currentLaserY = size.height * laserY
                 drawLine(
                     color = Color(0xFF4E9FFF),
@@ -515,6 +531,7 @@ private fun ScanOverlay(
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        // Card com status e progresso de múltiplos quadros
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = Color.Black.copy(alpha = 0.75f),
@@ -544,6 +561,9 @@ private fun ScanOverlay(
     }
 }
 
+/**
+ * Preview do CameraX com analisador de QR Code reutilizado e controle de taxa de quadros
+ */
 @Composable
 private fun CameraPreviewView(
     isScanningEnabled: Boolean,
@@ -551,6 +571,7 @@ private fun CameraPreviewView(
     onCameraReady: (Camera) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     val scanner = remember { BarcodeScanning.getClient() }
@@ -563,9 +584,11 @@ private fun CameraPreviewView(
             val previewView = PreviewView(ctx).apply {
                 scaleType = PreviewView.ScaleType.FILL_CENTER
             }
+
             val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
             cameraProviderFuture.addListener({
                 val cameraProvider = cameraProviderFuture.get()
+
                 val preview = Preview.Builder().build().also {
                     it.surfaceProvider = previewView.surfaceProvider
                 }
@@ -634,6 +657,9 @@ private fun CameraPreviewView(
     }
 }
 
+/**
+ * Modal BottomSheet mostrando os detalhes do BU lido com candidatos e partidos oficiais
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ResultadoBuBottomSheet(
@@ -671,6 +697,7 @@ fun ResultadoBuBottomSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+
                 IconButton(onClick = onDismiss) {
                     Icon(imageVector = Icons.Default.Close, contentDescription = "Fechar")
                 }
@@ -678,6 +705,7 @@ fun ResultadoBuBottomSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // Card com resumo da urna e validação
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
@@ -722,6 +750,7 @@ fun ResultadoBuBottomSheet(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Lista com os votos por cargo com nomes oficiais e partidos
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -744,6 +773,7 @@ fun ResultadoBuBottomSheet(
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                     Spacer(modifier = Modifier.height(6.dp))
+
                                     cargo.votosCandidatos.sortedByDescending { it.votos }.forEach { voto ->
                                         Row(
                                             modifier = Modifier
@@ -780,6 +810,8 @@ fun ResultadoBuBottomSheet(
                                             )
                                         }
                                     }
+
+                                    // Votos Brancos e Nulos
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -815,6 +847,10 @@ fun ResultadoBuBottomSheet(
         }
     }
 }
+
+// -------------------------------------------------------------
+// Helpers de decodificação de imagem da Galeria via ZXing
+// -------------------------------------------------------------
 
 private fun carregarBitmapDeUri(context: Context, uri: Uri): Bitmap? {
     return try {

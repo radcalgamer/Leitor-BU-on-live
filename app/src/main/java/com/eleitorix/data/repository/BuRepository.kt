@@ -35,7 +35,6 @@ class BuRepository(context: Context) {
     }
 
     suspend fun salvarBoletim(boletim: BoletimUrna): Long = withContext(Dispatchers.IO) {
-        // Primeiro resolve os nomes dos candidatos para já gravar com dados enriquecidos se possível
         val buEnriquecido = resolverNomesCandidatosNoBu(boletim)
         val entity = boletimParaEntity(buEnriquecido)
         buDao.insert(entity)
@@ -49,10 +48,6 @@ class BuRepository(context: Context) {
         buDao.deleteAll()
     }
 
-    /**
-     * Resolve os nomes e siglas de partidos de todos os candidatos em um BU
-     * usando a base de dados de candidatos.
-     */
     suspend fun resolverNomesCandidatosNoBu(bu: BoletimUrna): BoletimUrna = withContext(Dispatchers.IO) {
         val eleicoesEnriquecidas = bu.eleicoes.map { eleicao ->
             val cargosEnriquecidos = eleicao.cargos.map { cargo ->
@@ -70,7 +65,6 @@ class BuRepository(context: Context) {
                             partidoNumero = voto.numero.take(2).toIntOrNull()
                         )
                     } else {
-                        // Fallback mais amigável do que "candidato XXXX"
                         val partidoNum = voto.numero.take(2).toIntOrNull()
                         val siglaFallback = if (partidoNum != null) "Partido $partidoNum" else null
                         voto.copy(
@@ -87,16 +81,10 @@ class BuRepository(context: Context) {
         bu.copy(eleicoes = eleicoesEnriquecidas)
     }
 
-    /**
-     * Formatação correta para pluralização de seções: "1 seção" vs "X seções"
-     */
     fun formatarTotalSecoes(quantidade: Int): String {
         return if (quantidade == 1) "1 seção" else "$quantidade seções"
     }
 
-    /**
-     * Agrega votos de múltiplos boletins para uma eleição específica
-     */
     suspend fun agregarResultados(
         boletins: List<BoletimUrna>,
         filtroUf: String = "TODOS",
@@ -116,7 +104,6 @@ class BuRepository(context: Context) {
         val totalFaltas = busFiltrados.sumOf { it.faltas }
         val totalSecoes = busFiltrados.size
 
-        // Agrupamento por código de cargo
         val cargosMap = mutableMapOf<Int, MutableList<CargoVotacao>>()
         for (bu in busFiltrados) {
             for (eleicao in bu.eleicoes) {
@@ -138,7 +125,6 @@ class BuRepository(context: Context) {
             val totalVotosCargo = totalNominais + totalLegenda + totalBranco + totalNulos
             val votosValidos = totalNominais + totalLegenda
 
-            // Agrupa votos por candidato
             val votosPorCandidato = mutableMapOf<String, VotoCandidato>()
             for (cargoItem in listaCargos) {
                 for (voto in cargoItem.votosCandidatos) {
@@ -155,7 +141,6 @@ class BuRepository(context: Context) {
                 }
             }
 
-            // Garante resolução dos nomes oficiais de todos os candidatos
             val listaCandidatosFinal = votosPorCandidato.values.map { voto ->
                 val resolvido = if (voto.nomeUrna == null || voto.nomeUrna!!.startsWith("Candidato")) {
                     candidatoRepository.resolverCandidato(
@@ -177,7 +162,6 @@ class BuRepository(context: Context) {
                 )
             }.sortedByDescending { it.votos }
 
-            // Verifica projeção de 2º Turno caso seja Presidente ou Governador no 1º turno
             val turnoAtual = busFiltrados.firstOrNull()?.turno ?: 1
             val projecaoSegundoTurno = if (turnoAtual == 1 && CargoNomes.permiteSegundoTurno(codCargo) && listaCandidatosFinal.isNotEmpty()) {
                 val primeiro = listaCandidatosFinal.getOrNull(0)
@@ -233,10 +217,6 @@ class BuRepository(context: Context) {
             cargos = cargosAgregados
         )
     }
-
-    // -------------------------------------------------------------
-    // Serialização JSON para Room
-    // -------------------------------------------------------------
 
     private fun boletimParaEntity(bu: BoletimUrna): BuEntity {
         val root = JSONObject()
@@ -407,7 +387,6 @@ class BuRepository(context: Context) {
                 criadoEm = entity.criadoEm
             )
         } catch (e: Exception) {
-            // Em caso de erro na desserialização, cria modelo básico
             BoletimUrna(
                 id = entity.id,
                 pleito = entity.pleito,

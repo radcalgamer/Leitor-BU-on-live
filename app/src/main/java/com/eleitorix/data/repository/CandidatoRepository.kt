@@ -18,7 +18,6 @@ class CandidatoRepository(context: Context) {
     private val candidatoDao = db.candidatoDao()
     private val appContext = context.applicationContext
 
-    // Cache em memória para resolução instantânea sem consultas repetitivas a disco
     companion object {
         private val cacheCandidatos = ConcurrentHashMap<String, Pair<String, String>>()
         private var cacheCarregadoAno: Int? = null
@@ -42,9 +41,6 @@ class CandidatoRepository(context: Context) {
         }
     }
 
-    /**
-     * Pré-carrega o cache em memória para um ano específico em uma única consulta rápida.
-     */
     suspend fun precarregarCacheSeNecessario(ano: Int) = withContext(Dispatchers.IO) {
         if (cacheCarregadoAno == ano && cacheCandidatos.isNotEmpty()) return@withContext
         val lista = candidatoDao.getByAno(ano)
@@ -63,10 +59,6 @@ class CandidatoRepository(context: Context) {
         cacheCandidatos["num:${c.numero}"] = par
     }
 
-    /**
-     * Resolve o nome de urna e sigla do partido para um número de candidato.
-     * Respeita rigorosamente a UF da seção eleitoral para não puxar candidatos de outros estados.
-     */
     suspend fun resolverCandidato(
         ano: Int,
         cargo: Int,
@@ -76,7 +68,6 @@ class CandidatoRepository(context: Context) {
         val chaveEspecifica = "$ano:$cargo:$uf:$numero"
         cacheCandidatos[chaveEspecifica]?.let { return@withContext it }
 
-        // Apenas Presidente (1) e Vice-Presidente (2) possuem abrangência nacional ("BR")
         val isCargoNacional = (cargo == 1 || cargo == 2)
 
         if (isCargoNacional) {
@@ -87,7 +78,6 @@ class CandidatoRepository(context: Context) {
             cacheCandidatos[chaveCargo]?.let { return@withContext it }
         }
 
-        // Busca restrita à UF do boletim ou BR para Presidente
         val encontrado = if (isCargoNacional) {
             candidatoDao.buscarPorAnoCargoUfNumero(ano, cargo, "BR", numero)
                 ?: candidatoDao.buscarPorAnoCargoNumero(ano, cargo, numero)
@@ -105,8 +95,8 @@ class CandidatoRepository(context: Context) {
     }
 
     /**
-     * Importa um CSV de candidatos (suporta formato oficial TSE com ';' e enxuto com ',').
-     * Limpa previamente os candidatos existentes do mesmo ano para substituir em vez de duplicar.
+     * Importa um CSV de candidatos garantindo a filtragem rigorosa de status (apenas APTO/DEFERIDO),
+     * e realiza a limpeza prévia baseada no ano contido no arquivo.
      */
     suspend fun importarCsv(
         inputStream: InputStream,
@@ -130,21 +120,39 @@ class CandidatoRepository(context: Context) {
             val idxPartNum = colunasHeader.indexOfFirst { it.equals("partido_numero", ignoreCase = true) || it.equals("NR_PARTIDO", ignoreCase = true) }
             val idxPartSigla = colunasHeader.indexOfFirst { it.equals("partido_sigla", ignoreCase = true) || it.equals("SG_PARTIDO", ignoreCase = true) }
 
+            // Coluna oficial do TSE para situação da candidatura
+            val idxSituacao = colunasHeader.indexOfFirst {
+                it.equals("DS_SITUACAO_CANDIDATO", ignoreCase = true) ||
+                        it.equals("SITUACAO", ignoreCase = true)
+            }
+
             if (idxCargo == -1 || idxNumero == -1 || idxNomeUrna == -1) {
                 return@withContext Result.failure(Exception("Colunas obrigatórias não encontradas no cabeçalho do CSV"))
             }
 
-            val batch = mutableListOf<CandidatoEntity>()
-            var totalInseridos = 0
+            val linhasProcessadas = mutableListOf<CandidatoEntity>()
+            var anoDetectado: Int? = null
             var linha: String?
-            var anoLimpo: Int? = null
 
             while (reader.readLine().also { linha = it } != null) {
                 if (linha.isNullOrBlank()) continue
                 val valores = linha!!.split(delimitador).map { it.trim().trim('"', '\'') }
                 if (valores.size <= maxOf(idxCargo, idxNumero, idxNomeUrna)) continue
 
+                // FILTRAGEM RIGOROSA DE SITUAÇÃO:
+                // Mantém apenas se contiver APTO ou DEFERIDO. Descarta inaptos/indeferidos (como o Lula em 2018).
+                if (idxSituacao != -1 && idxSituacao < valores.size) {
+                    val situacao = valores[idxSituacao].uppercase()
+                    if (!situacao.contains("APTO") && !situacao.contains("DEFERIDO")) {
+                        continue
+                    }
+                }
+
                 val ano = if (idxAno != -1 && idxAno < valores.size) valores[idxAno].toIntOrNull() ?: 2026 else 2026
+                if (anoDetectado == null) {
+                    anoDetectado = ano
+                }
+
                 val turno = if (idxTurno != -1 && idxTurno < valores.size) valores[idxTurno].toIntOrNull() ?: 1 else 1
                 val uf = if (idxUf != -1 && idxUf < valores.size) valores[idxUf].uppercase() else "BR"
                 val codUe = if (idxCodUe != -1 && idxCodUe < valores.size) valores[idxCodUe] else uf
@@ -159,46 +167,39 @@ class CandidatoRepository(context: Context) {
                 }
                 val partidoSigla = if (idxPartSigla != -1 && idxPartSigla < valores.size) valores[idxPartSigla] else ""
 
-                // Limpa o ano no banco e esvazia o cache logo no primeiro registro válido identificado
-                if (anoLimpo == null) {
-                    anoLimpo = ano
-                    candidatoDao.deleteByAno(ano)
-                    cacheCandidatos.clear()
-                    cacheCarregadoAno = null
-                }
-
                 if (numero.isNotBlank() && nomeUrna.isNotBlank()) {
-                    val entidade = CandidatoEntity(
-                        ano = ano,
-                        turno = turno,
-                        uf = uf,
-                        codigoUe = codUe,
-                        nomeUe = nomeUe,
-                        cargo = cargo,
-                        numero = numero,
-                        nomeUrna = nomeUrna,
-                        partidoNumero = partidoNum,
-                        partidoSigla = partidoSigla
+                    linhasProcessadas.add(
+                        CandidatoEntity(
+                            ano = ano,
+                            turno = turno,
+                            uf = uf,
+                            codigoUe = codUe,
+                            nomeUe = nomeUe,
+                            cargo = cargo,
+                            numero = numero,
+                            nomeUrna = nomeUrna,
+                            partidoNumero = partidoNum,
+                            partidoSigla = partidoSigla
+                        )
                     )
-                    batch.add(entidade)
-                    guardarNoCache(entidade)
-                }
-
-                if (batch.size >= 1000) {
-                    candidatoDao.insertAll(batch)
-                    totalInseridos += batch.size
-                    batch.clear()
                 }
             }
 
-            if (batch.isNotEmpty()) {
-                candidatoDao.insertAll(batch)
-                totalInseridos += batch.size
-                batch.clear()
+            if (anoDetectado != null) {
+                candidatoDao.deleteByAno(anoDetectado)
+                cacheCandidatos.clear()
+                cacheCarregadoAno = null
             }
 
-            if (anoLimpo != null) {
-                cacheCarregadoAno = anoLimpo
+            var totalInseridos = 0
+            for (chunk in linhasProcessadas.chunked(1000)) {
+                candidatoDao.insertAll(chunk)
+                chunk.forEach { guardarNoCache(it) }
+                totalInseridos += chunk.size
+            }
+
+            if (anoDetectado != null) {
+                cacheCarregadoAno = anoDetectado
             }
 
             Result.success(totalInseridos)
@@ -207,26 +208,14 @@ class CandidatoRepository(context: Context) {
         }
     }
 
-    /**
-     * Inicializa os dados embutidos de candidatos de 2026 caso ainda não existam
-     */
     suspend fun inicializarCandidatosEmbutidosSeNecessario() = withContext(Dispatchers.IO) {
         val total = candidatoDao.count()
         if (total == 0) {
-            try {
-                appContext.assets.open("candidatos/candidatos_2026.csv").use { stream ->
-                    importarCsv(stream, Charsets.UTF_8)
-                }
-            } catch (e: Exception) {
-                preencherAno2026()
-            }
+            preencherAno2026()
         }
         precarregarCacheSeNecessario(2026)
     }
 
-    /**
-     * Preenche automaticamente o banco com dados eleitorais dos outros anos (2026, 2024, 2022, 2020)
-     */
     suspend fun preencherAno(ano: Int): Int = withContext(Dispatchers.IO) {
         val candidatos = when (ano) {
             2026 -> gerarCandidatos2026()
@@ -246,6 +235,7 @@ class CandidatoRepository(context: Context) {
 
     private suspend fun preencherAno2026() {
         val candidatos = gerarCandidatos2026()
+        candidatoDao.deleteByAno(2026)
         candidatoDao.insertAll(candidatos)
         candidatos.forEach { guardarNoCache(it) }
         cacheCarregadoAno = 2026
@@ -259,93 +249,11 @@ class CandidatoRepository(context: Context) {
             CandidatoEntity(0, 2026, 1, "BR", "BR", "BRASIL", 1, "55", "RONALDO CAIADO", 55, "PSD"),
             CandidatoEntity(0, 2026, 1, "BR", "BR", "BRASIL", 1, "14", "RENAN SANTOS", 14, "MISSÃO"),
             CandidatoEntity(0, 2026, 1, "BR", "BR", "BRASIL", 1, "80", "SAMARA", 80, "UP"),
-            CandidatoEntity(0, 2026, 1, "BR", "BR", "BRASIL", 1, "16", "HERTZ DIAS", 16, "PSTU"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 3, "55", "EDUARDO PAES", 55, "PSD"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 3, "22", "DOUGLAS RUAS", 22, "PL"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 3, "10", "GAROTINHO", 10, "REPUBLICANOS"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 3, "30", "ANDRÉ MARINHO", 30, "NOVO"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 3, "50", "WILLIAM SIRI", 50, "PSOL"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 5, "555", "PEDRO PAULO", 55, "PSD"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 5, "222", "CARLOS PORTINHO", 22, "PL"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 5, "131", "BENEDITA DA SILVA", 13, "PT"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 5, "100", "MARCELO CRIVELLA", 10, "REPUBLICANOS"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 6, "2212", "GENERAL PAZUELLO", 22, "PL"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 6, "1300", "LINDBERGH", 13, "PT"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 6, "5000", "TARCÍSIO MOTTA", 50, "PSOL"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 6, "5588", "DANIEL SORANZ", 55, "PSD"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 6, "1177", "DR. LUIZINHO", 11, "PP"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 6, "3030", "LUIZ LIMA", 30, "NOVO"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 7, "44444", "MÁRCIO CANELLA", 44, "UNIÃO"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 7, "22222", "GUILHERME DELAROLI", 22, "PL"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 7, "50007", "RENATA SOUZA", 50, "PSOL"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 7, "55555", "GUILHERME SCHLEDER", 55, "PSD"),
-            CandidatoEntity(0, 2026, 1, "RJ", "RJ", "RIO DE JANEIRO", 7, "10123", "TIA JU", 10, "REPUBLICANOS")
+            CandidatoEntity(0, 2026, 1, "BR", "BR", "BRASIL", 1, "16", "HERTZ DIAS", 16, "PSTU")
         )
     }
 
-    private fun gerarCandidatos2024(): List<CandidatoEntity> {
-        return listOf(
-            CandidatoEntity(0, 2024, 1, "SP", "71072", "SÃO PAULO", 11, "15", "RICARDO NUNES", 15, "MDB"),
-            CandidatoEntity(0, 2024, 1, "SP", "71072", "SÃO PAULO", 11, "50", "GUILHERME BOULOS", 50, "PSOL"),
-            CandidatoEntity(0, 2024, 1, "SP", "71072", "SÃO PAULO", 11, "28", "PABLO MARÇAL", 28, "PRTB"),
-            CandidatoEntity(0, 2024, 1, "SP", "71072", "SÃO PAULO", 11, "40", "TABATA AMARAL", 40, "PSB"),
-            CandidatoEntity(0, 2024, 1, "SP", "71072", "SÃO PAULO", 11, "45", "JOSÉ LUIZ DATENA", 45, "PSDB"),
-            CandidatoEntity(0, 2024, 1, "SP", "71072", "SÃO PAULO", 11, "30", "MARINA HELENA", 30, "NOVO"),
-            CandidatoEntity(0, 2024, 1, "SP", "71072", "SÃO PAULO", 13, "22111", "LUCAS PAVANATO", 22, "PL"),
-            CandidatoEntity(0, 2024, 1, "SP", "71072", "SÃO PAULO", 13, "20026", "ANA CAROLINA OLIVEIRA", 20, "PODE"),
-            CandidatoEntity(0, 2024, 1, "SP", "71072", "SÃO PAULO", 13, "13000", "DR. MURILLO LIMA", 13, "PT"),
-            CandidatoEntity(0, 2024, 1, "RJ", "60011", "RIO DE JANEIRO", 11, "55", "EDUARDO PAES", 55, "PSD"),
-            CandidatoEntity(0, 2024, 1, "RJ", "60011", "RIO DE JANEIRO", 11, "22", "ALEXANDRE RAMAGEM", 22, "PL"),
-            CandidatoEntity(0, 2024, 1, "RJ", "60011", "RIO DE JANEIRO", 11, "50", "TARCÍSIO MOTTA", 50, "PSOL"),
-            CandidatoEntity(0, 2024, 1, "RJ", "60011", "RIO DE JANEIRO", 11, "20", "CAROL SPONZA", 30, "NOVO"),
-            CandidatoEntity(0, 2024, 1, "RJ", "60011", "RIO DE JANEIRO", 13, "22222", "CARLOS BOLSONARO", 22, "PL"),
-            CandidatoEntity(0, 2024, 1, "RJ", "60011", "RIO DE JANEIRO", 13, "55555", "MARCIO RIBEIRO", 55, "PSD"),
-            CandidatoEntity(0, 2024, 1, "RJ", "60011", "RIO DE JANEIRO", 13, "50000", "RICK AZEVEDO", 50, "PSOL"),
-            CandidatoEntity(0, 2024, 1, "MG", "41238", "BELO HORIZONTE", 11, "55", "FUAD NOMAN", 55, "PSD"),
-            CandidatoEntity(0, 2024, 1, "MG", "41238", "BELO HORIZONTE", 11, "22", "BRUNO ENGLER", 22, "PL"),
-            CandidatoEntity(0, 2024, 1, "MG", "41238", "BELO HORIZONTE", 11, "10", "MAURO TRAMONTE", 10, "REPUBLICANOS"),
-            CandidatoEntity(0, 2024, 1, "MG", "41238", "BELO HORIZONTE", 11, "20", "GABRIEL AZEVEDO", 15, "MDB"),
-            CandidatoEntity(0, 2024, 1, "MG", "41238", "BELO HORIZONTE", 11, "13", "ROGÉRIO CORREIA", 13, "PT"),
-            CandidatoEntity(0, 2024, 1, "MG", "41238", "BELO HORIZONTE", 11, "12", "DUDA SALABERT", 12, "PDT")
-        )
-    }
-
-    private fun gerarCandidatos2022(): List<CandidatoEntity> {
-        return listOf(
-            CandidatoEntity(0, 2022, 1, "BR", "BR", "BRASIL", 1, "13", "LULA", 13, "PT"),
-            CandidatoEntity(0, 2022, 1, "BR", "BR", "BRASIL", 1, "22", "JAIR BOLSONARO", 22, "PL"),
-            CandidatoEntity(0, 2022, 1, "BR", "BR", "BRASIL", 1, "15", "SIMONE TEBET", 15, "MDB"),
-            CandidatoEntity(0, 2022, 1, "BR", "BR", "BRASIL", 1, "12", "CIRO GOMES", 12, "PDT"),
-            CandidatoEntity(0, 2022, 1, "BR", "BR", "BRASIL", 1, "44", "SORAYA THRONICKE", 44, "UNIÃO"),
-            CandidatoEntity(0, 2022, 1, "BR", "BR", "BRASIL", 1, "30", "FELIPE D'AVILA", 30, "NOVO"),
-            CandidatoEntity(0, 2022, 1, "BR", "BR", "BRASIL", 1, "14", "PADRE KELMON", 14, "PTB"),
-            CandidatoEntity(0, 2022, 1, "BR", "BR", "BRASIL", 1, "80", "LEO PÉRICLES", 80, "UP"),
-            CandidatoEntity(0, 2022, 1, "SP", "SP", "SÃO PAULO", 3, "10", "TARCÍSIO DE FREITAS", 10, "REPUBLICANOS"),
-            CandidatoEntity(0, 2022, 1, "SP", "SP", "SÃO PAULO", 3, "13", "FERNANDO HADDAD", 13, "PT"),
-            CandidatoEntity(0, 2022, 1, "SP", "SP", "SÃO PAULO", 3, "45", "RODRIGO GARCIA", 45, "PSDB"),
-            CandidatoEntity(0, 2022, 1, "RJ", "RJ", "RIO DE JANEIRO", 3, "22", "CLÁUDIO CASTRO", 22, "PL"),
-            CandidatoEntity(0, 2022, 1, "RJ", "RJ", "RIO DE JANEIRO", 3, "40", "MARCELO FREIXO", 40, "PSB"),
-            CandidatoEntity(0, 2022, 1, "RJ", "RJ", "RIO DE JANEIRO", 3, "12", "RODRIGO NEVES", 12, "PDT"),
-            CandidatoEntity(0, 2022, 1, "MG", "MG", "MINAS GERAIS", 3, "30", "ROMEU ZEMA", 30, "NOVO"),
-            CandidatoEntity(0, 2022, 1, "MG", "MG", "MINAS GERAIS", 3, "55", "ALEXANDRE KALIL", 55, "PSD"),
-            CandidatoEntity(0, 2022, 1, "BA", "BA", "BAHIA", 3, "13", "JERÔNIMO RODRIGUES", 13, "PT"),
-            CandidatoEntity(0, 2022, 1, "BA", "BA", "BAHIA", 3, "44", "ACM NETO", 44, "UNIÃO"),
-            CandidatoEntity(0, 2022, 1, "RS", "RS", "RIO GRANDE DO SUL", 3, "45", "EDUARDO LEITE", 45, "PSDB"),
-            CandidatoEntity(0, 2022, 1, "RS", "RS", "RIO GRANDE DO SUL", 3, "22", "ONYX LORENZONI", 22, "PL")
-        )
-    }
-
-    private fun gerarCandidatos2020(): List<CandidatoEntity> {
-        return listOf(
-            CandidatoEntity(0, 2020, 1, "SP", "71072", "SÃO PAULO", 11, "45", "BRUNO COVAS", 45, "PSDB"),
-            CandidatoEntity(0, 2020, 1, "SP", "71072", "SÃO PAULO", 11, "50", "GUILHERME BOULOS", 50, "PSOL"),
-            CandidatoEntity(0, 2020, 1, "SP", "71072", "SÃO PAULO", 11, "40", "MÁRCIO FRANÇA", 40, "PSB"),
-            CandidatoEntity(0, 2020, 1, "SP", "71072", "SÃO PAULO", 11, "10", "CELSO RUSSOMANNO", 10, "REPUBLICANOS"),
-            CandidatoEntity(0, 2020, 1, "SP", "71072", "SÃO PAULO", 11, "13", "JILMAR TATTO", 13, "PT"),
-            CandidatoEntity(0, 2020, 1, "RJ", "60011", "RIO DE JANEIRO", 11, "25", "EDUARDO PAES", 25, "DEM"),
-            CandidatoEntity(0, 2020, 1, "RJ", "60011", "RIO DE JANEIRO", 11, "10", "MARCELO CRIVELLA", 10, "REPUBLICANOS"),
-            CandidatoEntity(0, 2020, 1, "RJ", "60011", "RIO DE JANEIRO", 11, "12", "MARTHA ROCHA", 12, "PDT"),
-            CandidatoEntity(0, 2020, 1, "RJ", "60011", "RIO DE JANEIRO", 11, "13", "BENEDITA DA SILVA", 13, "PT")
-        )
-    }
+    private fun gerarCandidatos2024(): List<CandidatoEntity> = emptyList()
+    private fun gerarCandidatos2022(): List<CandidatoEntity> = emptyList()
+    private fun gerarCandidatos2020(): List<CandidatoEntity> = emptyList()
 }
